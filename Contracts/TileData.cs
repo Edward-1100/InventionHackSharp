@@ -23,5 +23,6 @@ namespace MegaDungeon.Contracts
 	{
 		byte[] GetTileBmpBytes(int index);
 		int GetGlyphNumByName(string name);
+		int GetGlyphForTileType(TileType tileType);
 	}
 }

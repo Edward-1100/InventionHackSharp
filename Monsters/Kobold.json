@@ -1,0 +1,15 @@
+{
+  "Kobold": {
+    "Name":{"NameString": "Kobold"},
+
+    "Actor":{"Speed": 8.0, "Gold": 0, "Energy": 0.0},
+    "AttackStat":{"Power": 1, "Accuracy": 70},
+    "DefenseStat":{"Chance": 1},
+    "Life":{"Health": 1, "MaxHealth": 1},
+
+    "Glyph":{"glyph": 60},
+    "Faction":{"Type": 2},
+    
+    "WanderingMonster":{}
+  }
+}

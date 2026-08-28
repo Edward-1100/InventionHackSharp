@@ -16,6 +16,9 @@
 	  <Content Include="..\tiledata.json" Link="Assets\tiledata.json">
 	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 	  </Content>
+	  <Content Include="..\Monsters\*.json" Link="Monsters\%(Filename)%(Extension)">
+	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </Content>
 	</ItemGroup>
 
 	<ItemGroup>

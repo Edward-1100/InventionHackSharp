@@ -90,9 +90,12 @@ namespace Portable
 				row.Auto();
 			}
 
+			var colIndex = 0;
 			foreach(var col in _table.GetColumns())
 			{
-				col.Star();
+				if(colIndex == 0) {col.Auto();}
+				else {col.Star();}
+				colIndex++;
 			}
 			var index = 0;
 			foreach (var cell in _table.GetCells())
