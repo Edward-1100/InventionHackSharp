@@ -1,0 +1,16 @@
+{
+  "Giant Ant": {
+    "Name":{"NameString": "Giant Ant"},
+
+    "Actor":{"Speed": 9.5, "Gold": 0, "Energy": 0.0},
+    "AttackStat":{"Power": 2, "Accuracy": 50},
+    "DefenseStat":{"Chance": 5},
+    "Life":{"Health": 10, "MaxHealth": 10},
+
+    "Glyph":{"glyph": 0},
+    "Faction":{"Type": 2},
+
+    "WanderingMonster":{},
+    "AIProfile":{"Rules":[{"Condition": "LowHealth", "Behavior": "Flee"},{"Condition": "NearPlayer", "Behavior": "Attack"},{"Condition": "Default", "Behavior": "Wander"}]}
+  }
+}

@@ -13,22 +13,21 @@ using static EntityComponentSystemCSharp.EntityManager;
 
 namespace MegaDungeon
 {
-	public class Engine : IEngine
+	public class Engine : IEngine, IGameSession
 	{
 		int _doorPercentChance = 50; // Percentage of possible doors that will actually spawn.
-		int _messageLimit = 5;
 		Random random = new Random();
 		int _width;
 		int _height;
-		int[,] _floor;
-		int[,] _floor_view; // a copy to return to make _floor effectively readonly
+		TileType[,] _floor;
+		TileType[,] _floor_view; // a copy to return to make _floor effectively readonly
 		RogueSharp.IMap _map;
 		ITileManager _tileManager;
 		Location _playerLocation = new Location();
 		List<int[]> _doorways = new List<int[]>();
 		EntityManager _entityManager = new EntityManager();
 		List<RogueSharp.ICell> _spawnLocations = new List<RogueSharp.ICell>();
-		List<ISystem> _turnSystems = new List<ISystem>();
+		ISystemProvider _systemProvider = new SystemProvider();
 		internal Queue<string> _messages = new Queue<string>();
 		SightStat _playerSiteDistance;
 		EntityManager.Entity _player;
@@ -36,13 +35,22 @@ namespace MegaDungeon
 		HashSet<Point> _viewable;
 		EngineLogger _logger;
 		List<Point> _doors = new List<Point>();
+		GameModeRegistry _gameModeRegistry = GameModeRegistry.CreateDefault();
+		MapGeneratorRegistry _mapGeneratorRegistry = MapGeneratorRegistry.CreateDefault();
+		Dictionary<string, string> _monsterPrototypes;
+		IGameMode _gameMode;
+		GameModeOutcome _gameModeOutcome = GameModeOutcome.InProgress;
+		GameModeOutcome _previousGameModeOutcome = GameModeOutcome.InProgress;
+		ClassRegistry _classRegistry = ClassRegistry.CreateDefault();
+		IPlayerClass _playerClass;
+		int _turnNumber = 0;
 		public ISystemLogger GetLogger() {return _logger;}
 		public RogueSharp.IMap GetMap() {return _map;}
 		public ITileManager GetTileManager() {return _tileManager;}
 		public EntityManager GetEntityManager() {return _entityManager;}
 		public HashSet<Point> GetPlayerViewable() {return _viewable;}
 		public Point GetPlayerLocation() {return new Point(){X = _playerLocation.X, Y = _playerLocation.Y};}
-		int DIRT, FLOOR, TILEABLEWALL, DARK, DOOR, PLAYER;
+		int PLAYER;
 
 		public HashSet<Point> Viewable
 		{
@@ -64,18 +72,50 @@ namespace MegaDungeon
 			get => _messages.ToArray();
 		}
 
-		/// <summary>
-		/// A grid of glyphs representing the discovered map.
-		/// </summary>
-		/// <value></value>
-		public int[,] Floor
+		public bool IsGameOver
 		{
-			get{ return _floor_view;}
+			get => (_player != null && !_player.HasComponent<Actor>()) || _gameModeOutcome != GameModeOutcome.InProgress;
 		}
 
-		public int[,] RevealedFloor
+		public GameStateSnapshot GetSnapshot()
 		{
-			get{ return (int[,])_floor;}
+			var actors = new List<ActorSnapshot>();
+			foreach(var entity in _entityManager.GetAllEntitiesWithComponent<Location>())
+			{
+				var location = entity.GetComponent<Location>();
+				var glyph = entity.GetComponent<Glyph>();
+				if(glyph == null) {continue;}
+				actors.Add(new ActorSnapshot()
+				{
+					EntityId = entity.Id,
+					X = location.X,
+					Y = location.Y,
+					Glyph = glyph.glyph,
+				});
+			}
+
+			return new GameStateSnapshot()
+			{
+				Tiles = _floor_view,
+				RevealedTiles = (TileType[,])_floor,
+				Viewable = _viewable,
+				PlayerLocation = new Point(_playerLocation.X, _playerLocation.Y),
+				Messages = _messages.ToArray(),
+				Actors = actors,
+				ModeHudLine = _gameMode.GetHudLine(this),
+				ModeOutcome = _gameModeOutcome,
+				TurnNumber = _turnNumber,
+			};
+		}
+
+		public TileType[,] Floor
+		{
+			get{return _floor_view;}
+		}
+
+		public TileType[,] RevealedFloor
+		{
+			get{return (TileType[,])_floor;}
 		}
 
 		/// <summary>
@@ -84,43 +124,48 @@ namespace MegaDungeon
 		/// <param name="width"></param>
 		/// <param name="height"></param>
 		/// <param name="tileManager"></param>
-		public Engine(int width, int height, ITileManager tileManager)
-		{
+		public Engine(int width, int height, ITileManager tileManager, string gameModeName = "Extermination", string playerClassName = "Warrior", string mapGeneratorName = "RandomRooms", string monstersPath = "Monsters") {
 			_width = width;
 			_height = height;
-			_floor = new int[width, height];
+			_floor = new TileType[width, height];
 			_tileManager = tileManager;
 			SetCommonTileGlyphs();
 
-			// RandomizeCave();
-			RandomizeFloor();
-			// BigRoom();
+			_map = _mapGeneratorRegistry.Create(mapGeneratorName, width, height);
 			InitCellGlyphs();
+			_monsterPrototypes = MonsterLoader.LoadAll(monstersPath);
 			_actorManager = new ActorManager(_entityManager);
+			_playerClass = _classRegistry.Create(playerClassName);
 			InitializePlayer();
 			PlaceMonsters();
+			_gameMode = _gameModeRegistry.Create(gameModeName);
+			_gameMode.Initialize(this);
 			UpdateViews();
 
 			// Add systems that should run every turn here.
 			_logger = new EngineLogger(this);
 
 			// Setup systems to run. Order matters.
-			_turnSystems.Add(new CombatSystem(this));
-			_turnSystems.Add(new HealthSystem(this));
-			_turnSystems.Add(new EnergySystem(this));
-			_turnSystems.Add(new WanderingMonsterSystem(this));
-			_turnSystems.Add(new MovementSystem(this));
+			_systemProvider.Register(new CombatSystem(this));
+			_systemProvider.Register(new HealthSystem(this));
+			_systemProvider.Register(new EnergySystem(this));
+			_systemProvider.Register(new AISystem(this, BehaviorRegistry.CreateDefault(), DefaultAIRules()));
+			_systemProvider.Register(new MovementSystem(this));
 		}
 
 		private void SetCommonTileGlyphs()
 		{
-			DARK = _tileManager.GetGlyphNumByName("dark part of a room");
-			DIRT = _tileManager.GetGlyphNumByName("sub mine walls 0");
-			FLOOR = _tileManager.GetGlyphNumByName("floor of a room");
-			TILEABLEWALL = _tileManager.GetGlyphNumByName("tileable wall");
-			DARK = _tileManager.GetGlyphNumByName("dark part of a room");
-			DOOR = _tileManager.GetGlyphNumByName("closed door 1");
 			PLAYER = _tileManager.GetGlyphNumByName("valkyrie");
+		}
+
+		static List<AIRule> DefaultAIRules()
+		{
+			return new List<AIRule>()
+			{
+				new AIRule(){Condition="LowHealth", Behavior="Flee"},
+				new AIRule(){Condition="NearPlayer", Behavior="Attack"},
+				new AIRule(){Condition="Default", Behavior="Wander"},
+			};
 		}
 
 		/// <summary>
@@ -129,6 +174,7 @@ namespace MegaDungeon
 		/// <param name="playerInput"></param>
 		public void DoTurn(PlayerInput playerInput)
 		{
+			_turnNumber++;
 			if(_player != null)
 			{
 				// Attach or modify any components needed to the player.
@@ -146,33 +192,43 @@ namespace MegaDungeon
 					desiredComp.X = desired.X;
 					desiredComp.Y = desired.Y;
 				}
+				_playerClass.BeforeTurn(this, _player);
 			}
 
 			// Cycle each entity through every system in turn.
 			foreach(var entity in _entityManager.Entities)
-			foreach(var system in _turnSystems)
+			foreach(var system in _systemProvider.GetSystems())
 			{
 				system.Run(entity);
 			}
 
-			UpdateViews();
-			while(_messages.Count() > _messageLimit)
+			if(_player != null)
 			{
-				_messages.Dequeue();
+				_playerClass.AfterTurn(this, _player);
+			}
+
+			UpdateViews();
+			_gameMode.OnTurn(this);
+			_gameModeOutcome = _gameMode.CheckOutcome(this);
+			if(_gameModeOutcome != _previousGameModeOutcome)
+			{
+				if(_gameModeOutcome == GameModeOutcome.Won) {_logger.Log($"{_gameMode.Name}: you won!");}
+				else if(_gameModeOutcome == GameModeOutcome.Lost) {_logger.Log($"{_gameMode.Name}: you lost.");}
+				_previousGameModeOutcome = _gameModeOutcome;
 			}
 		}
 
 
 		void InitializePlayer()
 		{
-			_player = _actorManager.GetPlayerActor(PLAYER);
+			_player = _actorManager.GetPlayerActor(PLAYER, _playerClass.Name, _playerClass.GetStats());
 			ICell cell = GetWalkableCell();
 			_playerSiteDistance = _player.GetComponent<SightStat>();
 			_playerLocation = new Location() { X = cell.X, Y = cell.Y };
 			_player.AddComponent(_playerLocation);
 		}
 
-		ICell GetWalkableCell()
+		public ICell GetWalkableCell()
 		{
 			var location = random.Next(0, _spawnLocations.Count);
 			var cell = _spawnLocations[location];
@@ -180,17 +236,15 @@ namespace MegaDungeon
 			return cell;
 		}
 
-		void PlaceMonsters()
-		{
+		void PlaceMonsters() {
+			if(_monsterPrototypes.Count == 0) {return;}
+			var names = _monsterPrototypes.Keys.ToList();
 			var numMonsters = RogueSharp.DiceNotation.Dice.Roll("1D6+3");
-			for(int i = 0; i < numMonsters; i++)
-			{
+			for(int i = 0; i < numMonsters; i++) {
 				var location = GetWalkableCell();
-				string name = $"Kobold";
-				var monster = _actorManager.CreateActor(60, name);
+				var name = names[random.Next(names.Count)];
+				var monster = _entityManager.NewEntityFromPrototype(_monsterPrototypes[name]);
 				monster.AddComponent(new Location(){X = location.X, Y = location.Y});
-				monster.AddComponent(new Faction(){Type = Factions.Monster});
-				monster.AddComponent<WanderingMonster>();
 				Debug.WriteLine($"Spawned {name} ({location.X},{location.Y})");
 			}
 		}
@@ -222,15 +276,15 @@ namespace MegaDungeon
 			{
 				for(int y = 0; y < _height; y++)
 				{
-					_floor[x,y] = DIRT;
+					_floor[x,y] = TileType.Dirt;
 					if(mapArray[x,y] == 0) 
 					{
-						_floor[x,y] = FLOOR;
+						_floor[x,y] = TileType.Floor;
 						if(doorways[x,y] > 0) {ConsiderAddDoor(x,y, (Orientation) doorways[x,y] -1);}
 					}
 					else 
 					{
-						if(walls[x,y] == 1) {_floor[x,y] = TILEABLEWALL;}
+						if(walls[x,y] == 1) {_floor[x,y] = TileType.Wall;}
 					}
 				}
 			}
@@ -255,7 +309,7 @@ namespace MegaDungeon
 				entity.AddComponent(isDoor);
 				var location = new Location(){X = x, Y = y};
 				entity.AddComponent(location);
-				var glyph = new Glyph(){glyph = DOOR};
+				var glyph = new Glyph(){glyph = _tileManager.GetGlyphForTileType(TileType.Door)};
 				entity.AddComponent(glyph);
 				_map.SetCellProperties(x, y, isTransparent: false, isWalkable: true);
 				_doors.Add(doorPoint);
@@ -288,7 +342,7 @@ namespace MegaDungeon
 
 			if(_floor_view == null)
 			{
-				_floor_view = new int[_floor.GetLength(0), _floor.GetLength(1)];
+				_floor_view = new TileType[_floor.GetLength(0), _floor.GetLength(1)];
 			}
 
 			for(int x = 0; x < _floor.GetLength(0); x++ )
@@ -297,7 +351,7 @@ namespace MegaDungeon
 				{
 					if(!_map.IsInFov(x, y))
 					{
-						_floor_view[x,y] = DARK;
+						_floor_view[x,y] = TileType.Dark;
 					}
 					else
 					{
@@ -323,24 +377,6 @@ namespace MegaDungeon
 		return circleFov;
 		}
 
-		private void BigRoom()
-		{
-			var bigroom = new RogueSharp.MapCreation.BorderOnlyMapCreationStrategy<RogueSharp.Map>(_width, _height);
-			_map = bigroom.CreateMap();
-		}
-
-		private void RandomizeFloor()
-		{
-			var maxRooms = (int) Math.Sqrt(_height * _width) * 2;
-			var randomRooms = new RogueSharp.MapCreation.RandomRoomsMapCreationStrategy<RogueSharp.Map>(_width, _height, maxRooms, 10, 5);
-			_map = randomRooms.CreateMap();
-		}
-
-		private void RandomizeCave()
-		{
-			var randomCaves = new CaveMapCreationStrategy<RogueSharp.Map>(_width, _height);
-			_map = randomCaves.CreateMap();
-		}
 	}
 
 }

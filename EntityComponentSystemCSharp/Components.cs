@@ -128,4 +128,9 @@ namespace EntityComponentSystemCSharp.Components
 	public class Stackable : IComponent
 	{
 	}
+
+	public class Exit : IComponent {public bool Locked;}
+	public class Switch : IComponent {}
+	public class GoldPickup : IComponent {public int Value;}
+	public class AIProfile : IComponent {public List<MegaDungeon.Contracts.AIRule> Rules = new List<MegaDungeon.Contracts.AIRule>();}
 }

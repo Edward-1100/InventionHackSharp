@@ -45,5 +45,8 @@ namespace EntityComponentSystemCSharp
 		{
 			throw new System.NotImplementedException();
 		}
+
+		public ICell GetWalkableCell() => throw new System.NotImplementedException();
+		
 	}
 }

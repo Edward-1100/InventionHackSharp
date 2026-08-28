@@ -12,18 +12,18 @@ namespace MegaDungeon
 			_entityManager = entityManager;
 		}
 
-		public EntityManager.Entity GetPlayerActor(int playerGlyph)
+		public EntityManager.Entity GetPlayerActor(int playerGlyph, string className, ClassStats stats)
 		{
 			var actor = CreateActor(
 				playerGlyph,
-				name: "Valkerie",
-				maxHealth: 10,
-				defense: 10,
-				power: 10,
-				accuracy: 75,
-				speed: 10
+				name: $"{className}",
+				maxHealth: stats.MaxHealth,
+				defense: stats.Defense,
+				power: stats.Power,
+				accuracy: stats.Accuracy,
+				speed: stats.Speed
 			);
-			actor.AddComponent(new SightStat(){Range=5});
+			actor.AddComponent(new SightStat(){Range=stats.SightRange});
 			actor.AddComponent<Player>();
 			return actor;
 		}

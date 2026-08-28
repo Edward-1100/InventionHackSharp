@@ -13,5 +13,6 @@ namespace EntityComponentSystemCSharp
 		HashSet<Point> GetPlayerViewable();
 		Point GetPlayerLocation();
 		ITileManager GetTileManager();
+		ICell GetWalkableCell();
 	}
 }

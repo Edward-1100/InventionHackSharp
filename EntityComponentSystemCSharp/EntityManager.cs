@@ -268,7 +268,8 @@ namespace EntityComponentSystemCSharp
 			foreach(var component in components)
 			{
 				var compStr = JsonConvert.SerializeObject(component.Value);
-				compStr = compStr.Replace("{","{" + " \"$type\": " + $"\"EntityComponentSystemCSharp.Components.{component.Key}, EntityComponentSystemCSharp\",\n");
+				var typeTag = "\"$type\": " + $"\"EntityComponentSystemCSharp.Components.{component.Key}, EntityComponentSystemCSharp\",\n";
+				compStr = "{" + typeTag + compStr.Substring(1);
 				var actualComp = JsonConvert.DeserializeObject<IComponent>(compStr, _serializerSettings);
 				entity.AddComponent(actualComp);
 			}

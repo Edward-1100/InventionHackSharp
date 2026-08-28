@@ -1,103 +1,158 @@
 using System;
-using System.Linq;
 using System.Collections.Generic;
-using EntityComponentSystemCSharp.Components;
-using EntityComponentSystemCSharp;
-using static EntityComponentSystemCSharp.EntityManager;
+using System.Linq;
 using static Portable.MegaDungeonUIConstants;
 using Inv;
 
 namespace Portable
 {
-
 	public class MegaDungeonUI
 	{
 		int _horizontalCellCount;
 		int _verticalCellCount;
 		Surface _surface;
-		MegaDungeon.Engine _engine;
-		MegaDungeon.PlayerInput _lastInput = MegaDungeon.PlayerInput.NONE;
 		TileManager _tileManager;
-		Dictionary<Entity, EntityComponentSystemCSharp.Components.Location> _lastLocation = new Dictionary<Entity, EntityComponentSystemCSharp.Components.Location>();
-		Dictionary<int, int> _actorLocationMap = new Dictionary<int, int>();
-		Cloth _cloth;
+
+		AppState _state = AppState.MainMenu;
+		string _selectedMode;
+		string _selectedClass;
+
+		MenuScreen _mainMenu;
+		MenuScreen _modeSelect;
+		MenuScreen _classSelect;
+		MenuScreen _gameOverMenu;
+		MenuScreen _winMenu;
+		Label _quitScreen;
+
+		MegaDungeon.IGameSession _engine;
+		InputHandler _inputHandler;
+		Renderer _renderer;
+		Action _updateAction;
 		Dock _outerDock;
 		Dock _innerDock;
-		Label _topLabel;
+		Dock _rightDock;
+		Stack _leftStack;
 		Label _bottomLabel;
-		Label _rightLabel;
-		Label _gameOver;
+		Label _floorTurnLabel;
+		Label _messageLabel;
+		Scroll _messageScroll;
+		Label _objectiveLabel;
 		EntityData _leftPanel;
-		bool _showDebugInfo = false;
 
-		static Dictionary<Inv.Key, Action> UICommands = new Dictionary<Key, Action>();
-		public MegaDungeon.PlayerInput LastInput { get => _lastInput; set => _lastInput = value; }
-
-		/// <summary>
-		/// Constructor for Main UI logic class. Sets up all UI windows.
-		/// </summary>
-		/// <param name="surface"></param>
-		/// <param name="horizontalCellCount"></param>
-		/// <param name="verticalCellCount"></param>
 		public MegaDungeonUI(Surface surface, int horizontalCellCount, int verticalCellCount)
 		{
 			_horizontalCellCount = horizontalCellCount;
 			_verticalCellCount = verticalCellCount;
+			_surface = surface;
+			_surface.ArrangeEvent += () => {
+				if(_rightDock != null) {_rightDock.Size.SetWidth(_surface.Window.Width / 4);}
+				if(_leftStack != null) {_leftStack.Size.SetWidth(_surface.Window.Width / 4);}
+			};
 
 			var directory = surface.Window.Application.Directory;
 			_tileManager = new TileManager(directory.NewAsset("absurd64.bmp"), directory.NewAsset("tiledata.json"));
-			_engine = new MegaDungeon.Engine(horizontalCellCount, verticalCellCount, _tileManager);
 
-			_tileManager = new TileManager(directory.NewAsset("absurd64.bmp"), directory.NewAsset("tiledata.json"));
-			_engine = new MegaDungeon.Engine(horizontalCellCount, verticalCellCount, _tileManager);
-			_surface = surface;
-			_cloth = CreateCloth();
+			_mainMenu = new MenuScreen(surface, "Dungeon Game", new List<string>(){"Start", "Quit"}, Colour.White);
+			_modeSelect = new MenuScreen(surface, "Choose Game Mode", MegaDungeon.GameModeRegistry.CreateDefault().GetNames().ToList(), Colour.White);
+			_classSelect = new MenuScreen(surface, "Choose A Class", MegaDungeon.ClassRegistry.CreateDefault().GetNames().ToList(), Colour.White);
+			_gameOverMenu = new MenuScreen(surface, "You Died", new List<string>(){"Retry", "Change Class", "Change Mode", "Main Menu"}, Colour.Red);
+			_winMenu = new MenuScreen(surface, "Victory!", new List<string>(){"Retry", "Change Class", "Change Mode", "Main Menu"}, Colour.YellowGreen);
+
+			_quitScreen = surface.NewLabel();
+			_quitScreen.Text = "Thanks for playing.";
+			_quitScreen.Font.ExtraMassive();
+			_quitScreen.Font.Colour = Colour.White;
+			_quitScreen.Background.Colour = Colour.Black;
+			_quitScreen.Justify.Center();
+
+			ShowMainMenu();
+		}
+
+		void ShowMainMenu()
+		{
+			_state = AppState.MainMenu;
+			_surface.Content = _mainMenu.Control;
+		}
+
+		void ShowModeSelect()
+		{
+			_state = AppState.ModeSelect;
+			_surface.Content = _modeSelect.Control;
+		}
+
+		void ShowClassSelect()
+		{
+			_state = AppState.ClassSelect;
+			_surface.Content = _classSelect.Control;
+		}
+
+		void ShowGameOver()
+		{
+			_state = AppState.GameOver;
+			_surface.Content = _gameOverMenu.Control;
+		}
+
+		void ShowWin()
+		{
+			_state = AppState.Win;
+			_surface.Content = _winMenu.Control;
+		}
+
+		void StartSession()
+		{
+			_state = AppState.Playing;
+
+			if(_updateAction != null) {_surface.ComposeEvent -= _updateAction;}
+
+			_engine = new MegaDungeon.Engine(_horizontalCellCount, _verticalCellCount, _tileManager, _selectedMode, _selectedClass);
+			_renderer = new Renderer(_tileManager, _horizontalCellCount, _verticalCellCount, _surface.Window.Width);
+			_inputHandler = new InputHandler(_renderer.ZoomIn, _renderer.ZoomOut, _renderer.ToggleDebugInfo);
+			_updateAction = () => Update();
+
+			BuildPlayingLayout();
+
+			_surface.Content = _outerDock;
+			_surface.ComposeEvent += Warmup();
+		}
+
+		void BuildPlayingLayout()
+		{
 			_outerDock = _surface.NewDock(Inv.Orientation.Vertical);
 			_innerDock = _surface.NewDock(Inv.Orientation.Horizontal);
-			
-			_topLabel = InitLabel("Top", ColorPallette.PrimaryColorLightest, ColorPallette.PrimaryColorDarkest, ColorPallette.PrimaryColorDarker);
-			_bottomLabel = InitLabel("Bottom", ColorPallette.Secondary1ColorLightest, ColorPallette.Secondary1ColorDarkest, ColorPallette.Secondary1ColorDarker);
-			_outerDock.AddHeader(_topLabel);
+
+			_bottomLabel = InitLabel("Arrows: move   Space: wait   F2: debug view   +/-: zoom", ColorPallette.Secondary1ColorLightest, ColorPallette.Secondary1ColorDarkest, ColorPallette.Secondary1ColorDarker);
 			_outerDock.AddClient(_innerDock);
 			_outerDock.AddFooter(_bottomLabel);
 
-			var vstack = _surface.NewVerticalStack();
-			vstack.Background.Colour = ColorPallette.Secondary1ColorDarkest;
-			vstack.Border.Set(5);
-			vstack.Border.Colour = ColorPallette.Secondary1ColorDarkest;
+			_leftStack = _surface.NewVerticalStack();
+			_leftStack.Background.Colour = ColorPallette.Secondary1ColorDarkest;
+			_leftStack.Border.Set(5);
+			_leftStack.Border.Colour = ColorPallette.Secondary1ColorDarkest;
+			_leftStack.Size.SetWidth(_surface.Window.Width / 4);
 
 			_leftPanel = new EntityData(_surface, ColorPallette.Secondary1ColorLightest, ColorPallette.Secondary1ColorDarkest);
-			vstack.AddPanel(_leftPanel.Table);
-			_rightLabel = InitLabel("Right", ColorPallette.ComplementColorLightest, ColorPallette.ComplementColorDarkest, ColorPallette.ComplementColorDarker);
-			_innerDock.AddHeader(vstack);
-			_innerDock.AddClient(_cloth);
-			_innerDock.AddFooter(_rightLabel);
-			_surface.Content = _outerDock;
-			_surface.ComposeEvent += Warmup();
+			_leftStack.AddPanel(_leftPanel.Table);
 
-			_gameOver = _surface.NewLabel();
-			_gameOver.Text = "YOU HAVE DIED.";
-			_gameOver.Font.ExtraMassive();
-			_gameOver.Font.Colour = Colour.Red;
-			_gameOver.Background.Colour = Colour.DarkBlue;
-			_gameOver.Justify.Center();
+			_floorTurnLabel = InitLabel("Floor 1 | Turn 0", ColorPallette.ComplementColorLightest, ColorPallette.ComplementColorDarkest, ColorPallette.ComplementColorDarker);
+			_messageLabel = InitLabel("", ColorPallette.ComplementColorLightest, ColorPallette.ComplementColorDarkest, ColorPallette.ComplementColorDarker);
+			_messageLabel.LineWrapping = true;
+			_messageScroll = _surface.NewVerticalScroll();
+			_messageScroll.Content = _messageLabel;
+			_objectiveLabel = InitLabel("", ColorPallette.ComplementColorLightest, ColorPallette.ComplementColorDarkest, ColorPallette.ComplementColorDarker);
 
-			InitUiCommands();
+			_rightDock = _surface.NewDock(Inv.Orientation.Vertical);
+			_rightDock.Size.SetWidth(_surface.Window.Width / 4);
+			_rightDock.AddHeader(_floorTurnLabel);
+			_rightDock.AddClient(_messageScroll);
+			_rightDock.AddFooter(_objectiveLabel);
 
-			_engine = new MegaDungeon.Engine(horizontalCellCount, verticalCellCount, _tileManager);
+			_innerDock.AddHeader(_leftStack);
+			_innerDock.AddClient(_renderer.Control);
+			_innerDock.AddFooter(_rightDock);
 		}
 
 		/// <summary>
-		/// Commands the only do something in the UI layer and are not passed into the game engine.
-		/// </summary>
-		void InitUiCommands()
-		{
-			UICommands[Inv.Key.Plus] = () => {_cloth.Zoom(0,0,1);};
-			UICommands[Inv.Key.Minus] = () => {_cloth.Zoom(0,0,-1);};
-			UICommands[Inv.Key.F2] = () => {_showDebugInfo = !_showDebugInfo;_cloth.Draw();};
-		}
-		/// <summary>
-		/// Check for full _cloth init before going to usual update
+		/// Check for full renderer init before going to usual update
 		/// </summary>
 		/// <returns>null</returns>
 		/// <remarks>
@@ -109,16 +164,20 @@ namespace Portable
 		{
 			return new Action( () =>
 			{
-				if(_cloth.BaseDimension.Height == 0)
+				if(!_renderer.IsReady)
 				{
 					return;
 				}
 				_surface.ComposeEvent -= Warmup();
-				_cloth.SetPanningXY(_engine.PlayerLocation.X, _engine.PlayerLocation.Y);
-				GetActorsFromEngine();
+				var snapshot = _engine.GetSnapshot();
+				_renderer.UpdateSnapshot(snapshot);
+				_renderer.SetPanningXY(snapshot.PlayerLocation.X, snapshot.PlayerLocation.Y);
+				_floorTurnLabel.Text = $"Floor 1 | Turn {snapshot.TurnNumber}";
+				_messageLabel.Text = string.Join("\n", snapshot.Messages);
+				_objectiveLabel.Text = snapshot.ModeHudLine;
 				_leftPanel.SetData(_engine.PlayerEntity);
-				_surface.ComposeEvent += () => Update();
-				_cloth.Draw();
+				_surface.ComposeEvent += _updateAction;
+				_renderer.Draw();
 			});
 		}
 
@@ -131,33 +190,74 @@ namespace Portable
 		/// </remarks>
 		void Update()
 		{
-			if (_lastInput != MegaDungeon.PlayerInput.NONE)
+			if (_inputHandler.LastInput != MegaDungeon.PlayerInput.NONE)
 			{
-				if(!_engine.PlayerEntity.HasComponent<Actor>())
+				if(_engine.IsGameOver)
 				{
-					_surface.Content = _gameOver;
+					var endSnapshot = _engine.GetSnapshot();
+					_inputHandler.LastInput = MegaDungeon.PlayerInput.NONE;
+					_surface.ComposeEvent -= _updateAction;
+					if(endSnapshot.ModeOutcome == MegaDungeon.GameModeOutcome.Won) {ShowWin();}
+					else {ShowGameOver();}
 					return;
 				}
-				_engine.DoTurn(_lastInput);
-				GetActorsFromEngine();
-				_cloth.KeepXYOnScreen(_engine.PlayerLocation.X, _engine.PlayerLocation.Y);
-				_bottomLabel.Text = string.Join("\n", _engine.Messages);
+				_engine.DoTurn(_inputHandler.LastInput);
+				var snapshot = _engine.GetSnapshot();
+				_renderer.UpdateSnapshot(snapshot);
+				_renderer.KeepXYOnScreen(snapshot.PlayerLocation.X, snapshot.PlayerLocation.Y);
+				_floorTurnLabel.Text = $"Floor 1 | Turn {snapshot.TurnNumber}";
+				_messageLabel.Text = string.Join("\n", snapshot.Messages);
+				_objectiveLabel.Text = snapshot.ModeHudLine;
 				_leftPanel.SetData(_engine.PlayerEntity);
-				_cloth.Draw();
-				_lastInput = MegaDungeon.PlayerInput.NONE;
+				_renderer.Draw();
+				_inputHandler.LastInput = MegaDungeon.PlayerInput.NONE;
 			}
 		}
 
 		public void AcceptInput(Inv.Keystroke keystroke)
 		{
-			if (KeyMap.ContainsKey(keystroke.Key))
+			switch(_state)
 			{
-				_lastInput = KeyMap[keystroke.Key];
+				case AppState.MainMenu: HandleMenuInput(keystroke, _mainMenu, OnMainMenuSelect); break;
+				case AppState.ModeSelect: HandleMenuInput(keystroke, _modeSelect, OnModeSelect); break;
+				case AppState.ClassSelect: HandleMenuInput(keystroke, _classSelect, OnClassSelect); break;
+				case AppState.GameOver: HandleMenuInput(keystroke, _gameOverMenu, OnEndScreenSelect); break;
+				case AppState.Win: HandleMenuInput(keystroke, _winMenu, OnEndScreenSelect); break;
+				case AppState.Playing: _inputHandler.AcceptInput(keystroke); break;
 			}
-			else if (UICommands.ContainsKey(keystroke.Key))
-			{
-				UICommands[keystroke.Key]();
-			}
+		}
+
+		void HandleMenuInput(Inv.Keystroke keystroke, MenuScreen menu, Action<string> onSelect)
+		{
+			if(keystroke.Key == Inv.Key.Up) {menu.MoveUp();}
+			else if(keystroke.Key == Inv.Key.Down) {menu.MoveDown();}
+			else if(keystroke.Key == Inv.Key.Space) {onSelect(menu.GetSelected());}
+		}
+
+		void OnMainMenuSelect(string option)
+		{
+			if(option == "Start") {ShowModeSelect();}
+			else if(option == "Quit") {_surface.Content = _quitScreen;}
+		}
+
+		void OnModeSelect(string option)
+		{
+			_selectedMode = option;
+			ShowClassSelect();
+		}
+
+		void OnClassSelect(string option)
+		{
+			_selectedClass = option;
+			StartSession();
+		}
+
+		void OnEndScreenSelect(string option)
+		{
+			if(option == "Retry") {StartSession();}
+			else if(option == "Change Class") {ShowClassSelect();}
+			else if(option == "Change Mode") {ShowModeSelect();}
+			else if(option == "Main Menu") {ShowMainMenu();}
 		}
 
 		Label InitLabel(string text, Colour fontColor,  Colour border, Colour background)
@@ -169,89 +269,6 @@ namespace Portable
 			newLabel.Border.Colour = border;
 			newLabel.Border.Set(1);
 			return newLabel;
-		}
-
-		internal Cloth CreateCloth()
-		{
-			var cloth = new Cloth();
-			cloth.Dimension = new Inv.Dimension(_horizontalCellCount, _verticalCellCount);
-			cloth.CellSize = (_surface.Window.Width / _horizontalCellCount) * 2; //How much of initial map to show.
-			cloth.Draw();
-			cloth.DrawEvent += (DC, patch) => Cloth_DrawEvent(DC, patch);
-			return cloth;
-		}
-
-		void Cloth_DrawEvent(DrawContract dc, Patch patch)
-		{
-			var point = new RogueSharp.Point(patch.X, patch.Y);
-			int glyph;
-			if(_showDebugInfo)
-			{
-				glyph = _engine.RevealedFloor[patch.X, patch.Y];
-			}
-			else
-			{
-				glyph = _engine.Floor[patch.X, patch.Y];
-			}
-
-			Inv.Image image;
-			if(_engine.Viewable.Contains(point) || _showDebugInfo)
-			{
-				if(_actorLocationMap.ContainsKey(patch.X + (patch.Y * _horizontalCellCount)))
-				{	
-					glyph = _actorLocationMap[patch.X + (patch.Y * _horizontalCellCount)];
-					image = _tileManager.GetInvImage(glyph);
-					dc.DrawImage(image, patch.Rect);
-					if(_showDebugInfo)
-					{
-						foreach(var loc in _lastLocation)
-						{
-							if(loc.Value.X == patch.X && loc.Value.Y == patch.Y)
-							{
-								DrawText(loc.Key.Id.ToString(), dc, patch);
-							}
-						}
-					}
-				}
-				else
-				{
-					image = _tileManager.GetInvImage(glyph);
-					dc.DrawImage(image, patch.Rect);
-				}
-			}
-			else
-			{
-				image = _tileManager.GetInvImageDark(glyph);
-				dc.DrawImage(image, patch.Rect);
-			}
-		}
-
-		void DrawText(string text, DrawContract dc, Patch patch)
-		{
-			dc.DrawText(text, "Courier", 11,FontWeight.Regular, Colour.YellowGreen, new Point(patch.Rect.Left, patch.Rect.Top), HorizontalPosition.Left, VerticalPosition.Top);
-		}
-		void GetActorsFromEngine()
-		{
-			// Remove old location from the map.
-			foreach (var actor in _engine.GetEntityManager().GetAllEntitiesWithComponent<EntityComponentSystemCSharp.Components.Location>())
-			{
-				var location = actor.GetComponent<EntityComponentSystemCSharp.Components.Location>();
-				var glyph = actor.GetComponent<Glyph>();
-				if (_lastLocation.ContainsKey(actor))
-				{
-					var last = _lastLocation[actor];
-					_actorLocationMap.Remove(last.X + (last.Y * _horizontalCellCount));
-				}
-			}
-
-			// Add new locations
-			foreach(var actor in _engine.GetEntityManager().GetAllEntitiesWithComponent<EntityComponentSystemCSharp.Components.Location>())
-			{
-				var location = actor.GetComponent<EntityComponentSystemCSharp.Components.Location>();
-				var glyph = actor.GetComponent<Glyph>();
-				_actorLocationMap[location.X + (location.Y * _horizontalCellCount)] = glyph.glyph;
-				_lastLocation[actor] = new EntityComponentSystemCSharp.Components.Location() {X = location.X, Y = location.Y};
-			}
 		}
 	}
 }
