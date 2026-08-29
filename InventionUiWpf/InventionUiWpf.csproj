@@ -10,15 +10,21 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <Content Include="..\absurd64.bmp" Link="Assets\absurd64.bmp">
-	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-	  </Content>
-	  <Content Include="..\tiledata.json" Link="Assets\tiledata.json">
-	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-	  </Content>
-	  <Content Include="..\Monsters\*.json" Link="Monsters\%(Filename)%(Extension)">
-	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-	  </Content>
+		<Content Include="..\absurd64.bmp" Link="Assets\absurd64.bmp">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+
+		<Content Include="..\tiledata.json" Link="Assets\tiledata.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+
+		<Content Include="..\Monsters\*.json" Link="Monsters\%(Filename)%(Extension)">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+
+		<Content Include="..\Mods\Monsters\*.json" Link="Mods\Monsters\%(Filename)%(Extension)">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
 	</ItemGroup>
 
 	<ItemGroup>
@@ -27,11 +33,11 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="Assets\" />
+		<Folder Include="Assets\" />
 	</ItemGroup>
 
 	<ItemGroup>
-	  <PackageReference Include="Invention.Platform.W" Version="1.0.50" />
+		<PackageReference Include="Invention.Platform.W" Version="1.0.50" />
 	</ItemGroup>
 
 </Project>

@@ -124,16 +124,17 @@ namespace MegaDungeon
 		/// <param name="width"></param>
 		/// <param name="height"></param>
 		/// <param name="tileManager"></param>
-		public Engine(int width, int height, ITileManager tileManager, string gameModeName = "Extermination", string playerClassName = "Warrior", string mapGeneratorName = "RandomRooms", string monstersPath = "Monsters") {
+		public Engine(int width, int height, ITileManager tileManager, string gameModeName = "Extermination", string playerClassName = "Warrior", string mapGeneratorName = "RandomRooms", string monstersPath = "Monsters", string monstersModsPath = "Mods/Monsters") {
 			_width = width;
 			_height = height;
 			_floor = new TileType[width, height];
 			_tileManager = tileManager;
+			_logger = new EngineLogger(this);
 			SetCommonTileGlyphs();
 
 			_map = _mapGeneratorRegistry.Create(mapGeneratorName, width, height);
 			InitCellGlyphs();
-			_monsterPrototypes = MonsterLoader.LoadAll(monstersPath);
+			_monsterPrototypes = MonsterLoader.LoadAll(monstersPath, monstersModsPath, _logger);
 			_actorManager = new ActorManager(_entityManager);
 			_playerClass = _classRegistry.Create(playerClassName);
 			InitializePlayer();
